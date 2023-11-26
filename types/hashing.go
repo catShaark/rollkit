@@ -32,8 +32,8 @@ func (h *Header) Hash() Hash {
 		ProposerAddress: h.ProposerAddress,
 
 		// Backward compatibility
-		ValidatorsHash:     cmbytes.HexBytes(h.ValidatorHash),
-		NextValidatorsHash: cmbytes.HexBytes(h.ValidatorHash),
+		ValidatorsHash:     h.ProposerAddress,
+		NextValidatorsHash: h.ProposerAddress,
 
 		ChainID: h.ChainID(),
 	}
