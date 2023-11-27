@@ -371,6 +371,7 @@ func (m *Manager) trySyncNextBlock(ctx context.Context, daHeight uint64) error {
 	if signedHeader != nil {
 		commit = &b.SignedHeader.Commit
 	}
+	valset := m.getValidatorSet(ctx)
 
 	if b != nil && commit != nil {
 		bHeight := uint64(b.Height())
@@ -379,6 +380,13 @@ func (m *Manager) trySyncNextBlock(ctx context.Context, daHeight uint64) error {
 		if err := m.executor.Validate(m.lastState, b); err != nil {
 			return fmt.Errorf("failed to validate block: %w", err)
 		}
+
+		// need to set validators into  header for light client compatibility
+		// because valset isn't change so always set the valset is the same with valset in genesis.
+		// TODO: set it once when create block manager instead of set per block
+		b.SignedHeader.Validators = valset
+		b.SignedHeader.ValidatorHash = b.SignedHeader.Validators.Hash()
+
 		newState, responses, err := m.executor.ApplyBlock(ctx, m.lastState, b)
 		if err != nil {
 			return fmt.Errorf("failed to ApplyBlock: %w", err)
@@ -387,10 +395,12 @@ func (m *Manager) trySyncNextBlock(ctx context.Context, daHeight uint64) error {
 		if err != nil {
 			return fmt.Errorf("failed to save block: %w", err)
 		}
-		_, _, err = m.executor.Commit(ctx, newState, b, responses)
+
+		appHash, _, err := m.executor.Commit(ctx, newState, b, responses)
 		if err != nil {
 			return fmt.Errorf("failed to Commit: %w", err)
 		}
+		newState.AppHash = appHash
 
 		err = m.store.SaveBlockResponses(uint64(bHeight), responses)
 		if err != nil {
@@ -543,11 +553,10 @@ func (m *Manager) getRemainingSleep(start time.Time) time.Duration {
 }
 
 func (m *Manager) getCommit(header types.Header) (*types.Commit, error) {
-	headerBytes, err := header.MarshalBinary()
-	if err != nil {
-		return nil, err
-	}
-	sign, err := m.proposerKey.Sign(headerBytes)
+	// note: for compatibility with tendermint light client
+	consensusVote := header.MakeCometBFTVote()
+
+	sign, err := m.proposerKey.Sign(consensusVote)
 	if err != nil {
 		return nil, err
 	}
@@ -567,6 +576,7 @@ func (m *Manager) IsProposer() (bool, error) {
 }
 
 func (m *Manager) publishBlock(ctx context.Context) error {
+
 	var lastCommit *types.Commit
 	var lastHeaderHash types.Hash
 	var err error
@@ -598,6 +608,7 @@ func (m *Manager) publishBlock(ctx context.Context) error {
 
 	var block *types.Block
 	var commit *types.Commit
+	valset := m.getValidatorSet(ctx)
 
 	// Check if there's an already stored block at a newer height
 	// If there is use that instead of creating a new block
@@ -614,6 +625,12 @@ func (m *Manager) publishBlock(ctx context.Context) error {
 		if err != nil {
 			return nil
 		}
+
+		// need to set validators into  header for light client compatibility
+		// because valset isn't change so always set the valset is the same with valset in genesis.
+		// TODO: set it once when create block manager instead of set per block
+		block.SignedHeader.Validators = valset
+		block.SignedHeader.ValidatorHash = block.SignedHeader.Validators.Hash()
 
 		commit, err = m.getCommit(block.SignedHeader.Header)
 		if err != nil {
@@ -642,6 +659,7 @@ func (m *Manager) publishBlock(ctx context.Context) error {
 		return err
 	}
 
+	// also need the block hash in signed header for light client compatibility
 	commit, err = m.getCommit(block.SignedHeader.Header)
 	if err != nil {
 		return err
@@ -672,10 +690,13 @@ func (m *Manager) publishBlock(ctx context.Context) error {
 	m.pendingBlocks.addPendingBlock(block)
 
 	// Commit the new state and block which writes to disk on the proxy app
-	_, _, err = m.executor.Commit(ctx, newState, block, responses)
+	appHash, _, err := m.executor.Commit(ctx, newState, block, responses)
 	if err != nil {
 		return err
 	}
+
+	// Update app hash in state
+	newState.AppHash = appHash
 
 	// SaveBlockResponses commits the DB tx
 	err = m.store.SaveBlockResponses(blockHeight, responses)
@@ -709,6 +730,20 @@ func (m *Manager) publishBlock(ctx context.Context) error {
 	return nil
 }
 
+func (m *Manager) getValidatorSet(ctx context.Context) *cmtypes.ValidatorSet {
+	genesisValset := m.genesis.Validators
+	var validatorSet *cmtypes.ValidatorSet
+	validators := make([]*cmtypes.Validator, len(genesisValset))
+
+	// nits
+	for i, val := range genesisValset {
+		validators[i] = cmtypes.NewValidator(val.PubKey, val.Power)
+	}
+
+	validatorSet = cmtypes.NewValidatorSet(validators)
+
+	return validatorSet
+}
 func (m *Manager) submitBlocksToDA(ctx context.Context) error {
 	submitted := false
 	backoff := initialBackoff
