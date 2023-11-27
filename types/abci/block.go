@@ -26,14 +26,16 @@ func ToABCIHeaderPB(header *types.Header) (cmproto.Header, error) {
 				Hash:  nil,
 			},
 		},
-		LastCommitHash:  header.LastHeaderHash[:],
-		DataHash:        header.DataHash[:],
-		ConsensusHash:   header.ConsensusHash[:],
-		AppHash:         header.AppHash[:],
-		LastResultsHash: header.LastResultsHash[:],
-		EvidenceHash:    new(cmtypes.EvidenceData).Hash(),
-		ProposerAddress: header.ProposerAddress,
-		ChainID:         header.ChainID(),
+		LastCommitHash:     header.LastHeaderHash[:],
+		DataHash:           header.DataHash[:],
+		ConsensusHash:      header.ConsensusHash[:],
+		AppHash:            header.AppHash[:],
+		LastResultsHash:    header.LastResultsHash[:],
+		EvidenceHash:       new(cmtypes.EvidenceData).Hash(),
+		ProposerAddress:    header.ProposerAddress,
+		ChainID:            header.ChainID(),
+		ValidatorsHash:     header.ValidatorHash,
+		NextValidatorsHash: header.ValidatorHash,
 	}, nil
 }
 
@@ -54,14 +56,16 @@ func ToABCIHeader(header *types.Header) (cmtypes.Header, error) {
 				Hash:  nil,
 			},
 		},
-		LastCommitHash:  cmbytes.HexBytes(header.LastCommitHash),
-		DataHash:        cmbytes.HexBytes(header.DataHash),
-		ConsensusHash:   cmbytes.HexBytes(header.ConsensusHash),
-		AppHash:         cmbytes.HexBytes(header.AppHash),
-		LastResultsHash: cmbytes.HexBytes(header.LastResultsHash),
-		EvidenceHash:    new(cmtypes.EvidenceData).Hash(),
-		ProposerAddress: header.ProposerAddress,
-		ChainID:         header.ChainID(),
+		LastCommitHash:     cmbytes.HexBytes(header.LastCommitHash),
+		DataHash:           cmbytes.HexBytes(header.DataHash),
+		ConsensusHash:      cmbytes.HexBytes(header.ConsensusHash),
+		AppHash:            cmbytes.HexBytes(header.AppHash),
+		ValidatorsHash:     cmbytes.HexBytes(header.ValidatorHash),
+		NextValidatorsHash: cmbytes.HexBytes(header.ValidatorHash),
+		LastResultsHash:    cmbytes.HexBytes(header.LastResultsHash),
+		EvidenceHash:       new(cmtypes.EvidenceData).Hash(),
+		ProposerAddress:    header.ProposerAddress,
+		ChainID:            header.ChainID(),
 	}, nil
 }
 
@@ -72,7 +76,12 @@ func ToABCIBlock(block *types.Block) (*cmtypes.Block, error) {
 	if err != nil {
 		return nil, err
 	}
-	abciCommit := block.SignedHeader.Commit.ToABCICommit(block.Height(), block.Hash())
+
+	valsAddr := block.SignedHeader.Validators
+	// we only have one centralize sequencer = 1 validators
+	val := valsAddr.Validators[0].Address
+
+	abciCommit := block.SignedHeader.Commit.ToABCICommit(block.Height(), block.Hash(), val, block.Time())
 	// This assumes that we have only one signature
 	if len(abciCommit.Signatures) == 1 {
 		abciCommit.Signatures[0].ValidatorAddress = block.SignedHeader.ProposerAddress

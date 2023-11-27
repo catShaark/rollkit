@@ -282,6 +282,7 @@ func (e *BlockExecutor) execute(ctx context.Context, state types.State, block *t
 	})
 
 	hash := block.Hash()
+
 	abciHeader, err := abciconv.ToABCIHeaderPB(&block.SignedHeader.Header)
 	if err != nil {
 		return nil, err
@@ -321,11 +322,11 @@ func (e *BlockExecutor) publishEvents(resp *cmstate.ABCIResponses, block *types.
 	if e.eventBus == nil {
 		return nil
 	}
-
 	abciBlock, err := abciconv.ToABCIBlock(block)
 	if err != nil {
 		return err
 	}
+	abciBlock.Header.ValidatorsHash = block.SignedHeader.Validators.Hash()
 
 	err = multierr.Append(err, e.eventBus.PublishEventNewBlock(cmtypes.EventDataNewBlock{
 		Block:            abciBlock,
